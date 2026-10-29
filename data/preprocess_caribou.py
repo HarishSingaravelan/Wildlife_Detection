@@ -53,12 +53,20 @@ class CaribouPreprocessor:
                 elif not line.startswith('#') and line and line != 'x1,y1,x2,y2':
                     x1, y1, x2, y2 = map(float, line.split(','))
                     
-                    # --- DYNAMIC ASPECT RATIO PADDING (H = W * 0.75) ---
+                    # --- DYNAMIC ASPECT RATIO PADDING ---
                     width = x2 - x1
                     if y1 == y2:
                         estimated_height = width * self.aspect_ratio_assumption
-                        y1 = y1 - (estimated_height / 2.0)
-                        y2 = y2 + (estimated_height / 2.0)
+                        
+                        # NUDGE VALUES: Adjust these until the visualizer shows the boxes on the bodies!
+                        # Positive X moves right, Positive Y moves down.
+                        x_nudge = 10.0  
+                        y_nudge = 15.0  
+                        
+                        x1 = x1 + x_nudge
+                        x2 = x2 + x_nudge
+                        y1 = (y1 - (estimated_height / 2.0)) + y_nudge
+                        y2 = (y2 + (estimated_height / 2.0)) + y_nudge
                     
                     boxes.append([x1, y1, x2, y2])
         
@@ -216,7 +224,7 @@ if __name__ == "__main__":
     # USER CONFIGURATION
     # =========================================================
     INPUT_IMAGE_DIR = "/shared/rc/turbine/Caribou/tif"  # Folder containing .tif files
-    INPUT_CSV_DIR   = "/shared/rc/turbine/Caribou/csvs" # Folder containing .csv files      
+    INPUT_CSV_DIR   = "/shared/rc/turbine/Caribou/csvs_fixed" # Folder containing .csv files      
     OUTPUT_DIR      = "/shared/rc/turbine/Caribou/COCO_Dataset" # Where to save the final dataset
 
     processor = CaribouPreprocessor(

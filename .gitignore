@@ -151,3 +151,5 @@ checkpoints/
 batchlogs/
 
 confusion_matrix_ppt.png
+
+debug_*

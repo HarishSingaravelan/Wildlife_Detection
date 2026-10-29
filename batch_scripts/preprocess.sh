@@ -4,8 +4,8 @@
 #SBATCH --partition=debug
 
 #SBATCH --job-name=wildlife_adam
-#SBATCH --output=batchlogs/preprocess_dataset1.out
-#SBATCH --error=batchlogs/preprocess_dataset1.err
+#SBATCH --output=batchlogs/preprocess_dataset_caribou_crt.out
+#SBATCH --error=batchlogs/preprocess_dataset_caribou_crt.err
 #SBATCH --mail-type=ALL
 #SBATCH --time=0-12:00:00
 #SBATCH --mem=256g
@@ -23,5 +23,13 @@ export PYTHONPATH=$(pwd)
 
 
 # Run training
-python3 data/resize_dataset.py
+# python data/debug_viz.py 
+
+python data/preprocess_caribou.py
+
+# python data/split_dataset.py \
+#   --source_root "/shared/rc/turbine/Caribou/COCO_Dataset/images" \
+#   --annotation_file "/shared/rc/turbine/Caribou/COCO_Dataset/caribou_coco_annotations.json" \
+#   --output_root "/shared/rc/turbine/caribou_split_stratified" \
+#   --copy_images
 # python -m inference.manual_evaluate

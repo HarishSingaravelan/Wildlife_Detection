@@ -9,27 +9,27 @@ ablations:
 
 training:
   num_epochs: 400 #50 for full             
-  batch_size: 16 # 4 for defomable  1.66batch/sec for 32 
+  batch_size: 32 # 4 for defomable  1.66batch/sec for 32 
   num_workers: 34 # 34 on A100 0 for local testing
-  learning_rate: 0.00001      
+  learning_rate: 0.00001       #0.00001      
   weight_decay: 0.0001
   # Learning rate scheduler
   scheduler_step_size: 40       # Reduce LR every N epochs 
   scheduler_gamma: 0.1          # LR = LR * gamma
   
   # Early stopping
-  patience: 50   # Stop if no improvement for N evaluations
+  patience: 100   # Stop if no improvement for N evaluations
   
   device: "cuda"
-  output_model_path: "models/dfine/detr_adaptive.pth"
+  output_model_path: "models/detr_caribou/detr_adaptive.pth"
 
   # Evaluation
-  eval_every_n_epochs: 5      # Evaluate less frequently (dataset is larger)
+  eval_every_n_epochs: 10      # Evaluate less frequently (dataset is larger)
   save_best_model: true
   
 
   # Checkpointing
-  checkpoint_dir: "checkpoints/dfine/detr_adaptive/"
+  checkpoint_dir: "checkpoints/detr_caribou/detr_adaptive/"
   save_checkpoint_every: 5
 
   # Resume from checkpoint
@@ -38,10 +38,10 @@ training:
 evaluation:
   compute_pr_curve: true
   compute_confusion_matrix: true
-  confidence_threshold: 0.5  
+  confidence_threshold: 0.1  
   iou_threshold: 0.5
   save_plots: true
-  plots_dir: "metrics/dfine/detr_adaptive/"
+  plots_dir: "metrics/detr_caribou/detr_adaptive/"
   show_plots: false
 
 
@@ -117,15 +117,38 @@ evaluation:
 
 
 # -----------------Stratified compressed image path-------------------------------------
+# data:
+#   train_images_dir: "../../../../shared/rc/turbine/resized_dataset_statified"
+#   train_ann_file: "../../../../shared/rc/turbine/resized_dataset_statified/turbine_split_stratified/train/annotations.json"
+
+#   val_images_dir: "../../../../shared/rc/turbine/resized_dataset_statified"
+#   val_ann_file: "../../../../shared/rc/turbine/resized_dataset_statified/turbine_split_stratified/val/annotations.json"
+
+#   test_images_dir: "../../../../shared/rc/turbine/resized_dataset_statified"
+#   test_ann_file: "../../../../shared/rc/turbine/resized_dataset_statified/turbine_split_stratified/test/annotations.json"
+
+#----------------------------Stratified caribou split-------------------------------------
+
 data:
-  train_images_dir: "../../../../shared/rc/turbine/resized_dataset_statified"
-  train_ann_file: "../../../../shared/rc/turbine/resized_dataset_statified/turbine_split_stratified/train/annotations.json"
+  train_images_dir: "../../../../shared/rc/turbine/Caribou/COCO_Dataset/images"
+  train_ann_file: "../../../../shared/rc/turbine/caribou_split_stratified/train/annotations.json"
 
-  val_images_dir: "../../../../shared/rc/turbine/resized_dataset_statified"
-  val_ann_file: "../../../../shared/rc/turbine/resized_dataset_statified/turbine_split_stratified/val/annotations.json"
+  val_images_dir: "../../../../shared/rc/turbine/Caribou/COCO_Dataset/images"
+  val_ann_file: "../../../../shared/rc/turbine/caribou_split_stratified/val/annotations.json"
 
-  test_images_dir: "../../../../shared/rc/turbine/resized_dataset_statified"
-  test_ann_file: "../../../../shared/rc/turbine/resized_dataset_statified/turbine_split_stratified/test/annotations.json"
+  test_images_dir: "../../../../shared/rc/turbine/Caribou/COCO_Dataset/images"
+  test_ann_file: "../../../../shared/rc/turbine/caribou_split_stratified/test/annotations.json"
+
+#---------------------------- SAHI bird split -------------------------------------
+# data:
+#   train_images_dir: "../../../../shared/rc/turbine/turbine_sahi_tiles_1024/train"
+#   train_ann_file: "../../../../shared/rc/turbine/turbine_sahi_tiles_1024/train/annotations.json"
+
+#   val_images_dir: "../../../../shared/rc/turbine/turbine_sahi_tiles_1024/val"
+#   val_ann_file: "../../../../shared/rc/turbine/turbine_sahi_tiles_1024/val/annotations.json"
+
+#   test_images_dir: "../../../../shared/rc/turbine/turbine_sahi_tiles_1024/test"
+#   test_ann_file: "../../../../shared/rc/turbine/turbine_sahi_tiles_1024/test/annotations.json"
 
 
   background_ratio: 0.05        
@@ -133,70 +156,81 @@ data:
   min_bg_ratio: 0.00            
   max_bg_ratio: 0.50
 
+# model:
+#   num_object_classes: 56       # 55 classes + 1 background padding
+#   class_names:
+#    - "background"                    # index 0
+#    - "red_tailed_hawk"                # index 1
+#    - "red_winged_blackbird"           # index 2
+#    - "ovenbird"                      # index 3
+#    - "red_headed_woodpecker"         # index 4
+#    - "american_woodcock"             # index 5
+#    - "black_crowned_night_heron"     # index 6
+#    - "northern_flicker"              # index 7
+#    - "eastern_red_bat"               # index 8
+#    - "black_tern"                    # index 9
+#    - "ring_necked_pheasant"          # index 10
+#    - "american_robin"                # index 11
+#    - "sharp_tailed_grouse"           # index 12
+#    - "silver_haired_bat"             # index 13
+#    - "northern_shoveler"             # index 14
+#    - "mallard"                       # index 15
+#    - "eastern_bluebird"              # index 16
+#    - "tree_swallow"                  # index 17
+#    - "common_merganser"              # index 18
+#    - "peregrine_falcon"              # index 19
+#    - "yellow_bellied_sapsucker"      # index 20
+#    - "brewers_blackbird"             # index 21
+#    - "herring_gull"                  # index 22
+#    - "ferruginous_hawk"              # index 23
+#    - "hoary_bat"                     # index 24
+#    - "little_brown_bat"              # index 25
+#    - "big_brown_bat"                 # index 26
+#    - "pied_billed_grebe"             # index 27
+#    - "bufflehead"                    # index 28
+#    - "rock_pigeon"                   # index 29
+#    - "coopers_hawk"                  # index 30
+#    - "american_coot"                 # index 31
+#    - "lesser_yellowlegs"             # index 32
+#    - "willet"                        # index 33
+#    - "upland_sandpiper"              # index 34
+#    - "brown_headed_cowbird"          # index 35
+#    - "other_bat"                     # index 36
+#    - "great_horned_owl"              # index 37
+#    - "bobolink"                      # index 38
+#    - "yellow_headed_blackbird"       # index 39
+#    - "northern_flicker_yellow_shafted" # index 40
+#    - "cedar_waxwing"                 # index 41
+#    - "snow_goose"                    # index 42
+#    - "greater_white_fronted_goose"   # index 43
+#    - "canada_goose"                  # index 44
+#    - "chestnut_collared_longspur"    # index 45
+#    - "mourning_dove"                 # index 46
+#    - "house_sparrow"                 # index 47
+#    - "franklins_gull"                # index 48
+#    - "white_throated_sparrow"        # index 49
+#    - "dark_eyed_junco"               # index 50
+#    - "barn_swallow"                  # index 51
+#    - "other_songbird"                # index 52
+#    - "harriss_sparrow"               # index 53 
+#    - "american_bittern"              # index 54 
+#    - "unknown"                       # index 55
+
+
+#----------------Caribou model -----------------------
+
 model:
-  num_object_classes: 56       # 55 classes + 1 background padding
+  num_object_classes: 4
   class_names:
    - "background"                    # index 0
-   - "red_tailed_hawk"                # index 1
-   - "red_winged_blackbird"           # index 2
-   - "ovenbird"                      # index 3
-   - "red_headed_woodpecker"         # index 4
-   - "american_woodcock"             # index 5
-   - "black_crowned_night_heron"     # index 6
-   - "northern_flicker"              # index 7
-   - "eastern_red_bat"               # index 8
-   - "black_tern"                    # index 9
-   - "ring_necked_pheasant"          # index 10
-   - "american_robin"                # index 11
-   - "sharp_tailed_grouse"           # index 12
-   - "silver_haired_bat"             # index 13
-   - "northern_shoveler"             # index 14
-   - "mallard"                       # index 15
-   - "eastern_bluebird"              # index 16
-   - "tree_swallow"                  # index 17
-   - "common_merganser"              # index 18
-   - "peregrine_falcon"              # index 19
-   - "yellow_bellied_sapsucker"      # index 20
-   - "brewers_blackbird"             # index 21
-   - "herring_gull"                  # index 22
-   - "ferruginous_hawk"              # index 23
-   - "hoary_bat"                     # index 24
-   - "little_brown_bat"              # index 25
-   - "big_brown_bat"                 # index 26
-   - "pied_billed_grebe"             # index 27
-   - "bufflehead"                    # index 28
-   - "rock_pigeon"                   # index 29
-   - "coopers_hawk"                  # index 30
-   - "american_coot"                 # index 31
-   - "lesser_yellowlegs"             # index 32
-   - "willet"                        # index 33
-   - "upland_sandpiper"              # index 34
-   - "brown_headed_cowbird"          # index 35
-   - "other_bat"                     # index 36
-   - "great_horned_owl"              # index 37
-   - "bobolink"                      # index 38
-   - "yellow_headed_blackbird"       # index 39
-   - "northern_flicker_yellow_shafted" # index 40
-   - "cedar_waxwing"                 # index 41
-   - "snow_goose"                    # index 42
-   - "greater_white_fronted_goose"   # index 43
-   - "canada_goose"                  # index 44
-   - "chestnut_collared_longspur"    # index 45
-   - "mourning_dove"                 # index 46
-   - "house_sparrow"                 # index 47
-   - "franklins_gull"                # index 48
-   - "white_throated_sparrow"        # index 49
-   - "dark_eyed_junco"               # index 50
-   - "barn_swallow"                  # index 51
-   - "other_songbird"                # index 52
-   - "harriss_sparrow"               # index 53 
-   - "american_bittern"              # index 54 
-   - "unknown"                       # index 55
+   - "Adult Caribou"                 # index 1
+   - "Calf Caribou"                  # index 2
+   - "Ghost Caribou"                 # index 3
 
                     
 
-  architecture: "dfine"               # Options: "faster_rcnn" or "standard_detr" or "deformable_detr" or "dfine"
-  pretrained_model: "ustc-community/dfine_x_coco"          # Options:  "resnet50_fpn" or "facebook/detr-resnet-50" or "SenseTime/deformable-detr" or "ustc-community/dfine_x_coco"
+  architecture: "standard_detr"      # Options: "faster_rcnn" or "standard_detr" or "deformable_detr" or "dfine"
+  pretrained_model: "facebook/detr-resnet-50"          # Options:  "resnet50_fpn" or "facebook/detr-resnet-50" or "SenseTime/deformable-detr" or "ustc-community/dfine_x_coco"
 
 
 

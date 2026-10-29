@@ -1,13 +1,15 @@
 #!/bin/bash -l
 # Configuration Options
 #SBATCH --account=turbine
-#SBATCH --partition=tier3 
+#SBATCH --partition=debug
+
+
 
 #SBATCH --job-name=wildlife_adam
-#SBATCH --output=batchlogs/dfine/detr_adaptive.out
-#SBATCH --error=batchlogs/dfine/detr_adaptive.err
+#SBATCH --output=batchlogs/detr_caribou/detr_adaptive.out
+#SBATCH --error=batchlogs/detr_caribou/detr_adaptive.err
 #SBATCH --mail-type=ALL
-#SBATCH --time=8-05:00:00
+#SBATCH --time=1-00:00:00 
 #SBATCH --mem=256g
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
