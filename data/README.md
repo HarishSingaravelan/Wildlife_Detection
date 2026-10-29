@@ -104,7 +104,7 @@ Use the backslash (`\`) to continue the command across multiple lines for better
 Here the location file is for the Remote system. Add you local system or replace it with windows folder location
 
 ```bash
-python split_dataset_stratified.py \
+python split_dataset.py \
   --source_root "../../../../shared/rc/turbine/resized_dataset_new/Test_2021_SY" \
   --annotation_file "../../../../shared/rc/turbine/resized_dataset_new/coco_annotations_new.json" \
   --output_root "../../../../shared/rc/turbine/resized_dataset_new/turbine_split_stratified" \

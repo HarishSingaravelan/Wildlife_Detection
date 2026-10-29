@@ -9,11 +9,12 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 import yaml
 import sys
 import os
+import json
 import traceback
 import numpy as np
 import scipy.optimize as scipy_opt
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-from datetime import datetime  
+from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -39,8 +40,8 @@ def patched_fastrcnn_loss(class_logits, box_regression, labels, regression_targe
         
         GLOBAL_FASTRCNN_LOGS.clear()
         for class_id in cat_labels.unique():
-            c_id = class_id.item()
-            GLOBAL_FASTRCNN_LOGS[f"log_only_class_{c_id}"] = unreduced_loss[cat_labels == c_id].mean()
+            c_id = int(class_id.item())
+            GLOBAL_FASTRCNN_LOGS[f"log_only_class_{c_id}"] = float(unreduced_loss[cat_labels == class_id].mean().item())
             
     return losses
 
@@ -48,19 +49,40 @@ roi_heads.fastrcnn_loss = patched_fastrcnn_loss
 
 
 # ==============================================================================
+# HELPER: Safe Float Conversion for TensorBoard & JSON Logs
+# ==============================================================================
+def to_safe_float(val, default=0.0):
+    """Converts Tensors, NumPy scalars, and NaNs/Infs into clean Python floats."""
+    if val is None:
+        return float(default)
+    if isinstance(val, torch.Tensor):
+        if val.numel() == 0:
+            return float(default)
+        val = val.detach().cpu().item() if val.numel() == 1 else val.detach().cpu().float().mean().item()
+    elif isinstance(val, (np.ndarray, np.generic)):
+        if val.size == 0:
+            return float(default)
+        val = float(val.item()) if val.size == 1 else float(np.nanmean(val))
+    try:
+        f_val = float(val)
+        if np.isnan(f_val) or np.isinf(f_val) or f_val < 0.0:
+            return float(default)
+        return f_val
+    except (ValueError, TypeError):
+        return float(default)
+
+
+# ==============================================================================
 # DYNAMIC INNER-SIOU INTERCEPTION LOGIC (GLOBAL OVERRIDE)
 # ==============================================================================
 def apply_inner_siou_patch(arch):
-    print(f"\n🌟 ABLATION ENABLED: Injecting Inner-SIoU into {arch.upper()}!")
+    print(f"\n🌟 ABLATION ENABLED: Injecting Inner-SIoU into {arch.upper()}!", flush=True)
 
     if arch == "faster_rcnn":
-        print("   ↳ Inner-SIoU safely bypassed for Faster R-CNN.")
+        print("   ↳ Inner-SIoU safely bypassed for Faster R-CNN.", flush=True)
         return
 
     try:
-        import sys
-        import numpy as np
-        import scipy.optimize as scipy_opt
         import transformers.loss.loss_for_object_detection as hf_loss_module
 
         matcher_module = sys.modules['transformers.loss.loss_for_object_detection']
@@ -138,7 +160,7 @@ def apply_inner_siou_patch(arch):
             return result
 
         HungarianMatcher.forward = patched_matcher_forward
-        print("   ↳ HungarianMatcher: standard converter + NaN-safe cost matrix")
+        print("   ↳ HungarianMatcher: standard converter + NaN-safe cost matrix", flush=True)
 
         # ── Patch 2: generalized_box_iou — Inner-SIoU 1.25x + sanitize before orig_giou ──
         orig_giou = hf_loss_module.generalized_box_iou
@@ -154,11 +176,11 @@ def apply_inner_siou_patch(arch):
 
         hf_loss_module.generalized_box_iou = patched_generalized_box_iou
         matcher_module.generalized_box_iou = patched_generalized_box_iou
-        print("   ↳ generalized_box_iou: Inner-SIoU 1.25x + NaN/OOB sanitization")
-        print("   ↳ Patch complete!")
+        print("   ↳ generalized_box_iou: Inner-SIoU 1.25x + NaN/OOB sanitization", flush=True)
+        print("   ↳ Patch complete!", flush=True)
 
     except Exception as e:
-        print(f"   ⚠ CRITICAL ERROR injecting Inner-SIoU: {e}")
+        print(f"   ⚠ CRITICAL ERROR injecting Inner-SIoU: {e}", flush=True)
         traceback.print_exc()
 
 
@@ -194,17 +216,18 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
         self.config = config  
         self.arch = config['model'].get('architecture', 'standard_detr').lower()
         self.num_classes = config['model']['num_object_classes']
+        self.class_names = config['model'].get('class_names', [f"Class_{i}" for i in range(self.num_classes)])
         self.ablations = config.get('ablations', {})
         
         # Apply Inner-SIoU Globally upon initialization
         if self.ablations.get('use_inner_siou', False):
             apply_inner_siou_patch(self.arch)
         else:
-            print(f"\nABLATION CONTROL: Standard Bounding Box Loss (Inner-SIoU Disabled)")
+            print(f"\nABLATION CONTROL: Standard Bounding Box Loss (Inner-SIoU Disabled)", flush=True)
 
         if self.arch == "faster_rcnn":
-            print(f"\n Architecture flag '{self.arch}' detected. Overriding DETR...")
-            print(" Initializing Faster R-CNN (ResNet50-FPN)...")
+            print(f"\n Architecture flag '{self.arch}' detected. Overriding DETR...", flush=True)
+            print(" Initializing Faster R-CNN (ResNet50-FPN)...", flush=True)
             self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights="DEFAULT")
             in_features = self.model.roi_heads.box_predictor.cls_score.in_features
             self.model.roi_heads.box_predictor = FastRCNNPredictor(in_features, self.num_classes)
@@ -222,10 +245,10 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
             )
 
         if self.ablations.get('use_adaptive_sampler', False):
-            print("ABLATION ENABLED: Adaptive Data Sampler Active!")
+            print("ABLATION ENABLED: Adaptive Data Sampler Active!", flush=True)
             self._setup_adaptive_sampler(config)
         else:
-            print("ABLATION CONTROL: Standard Random Dataloader (Sampler Disabled)")
+            print("ABLATION CONTROL: Standard Random Dataloader (Sampler Disabled)", flush=True)
 
         self.eval_every_n_epochs = config['training'].get('eval_every_n_epochs', 5)
         self.save_best_model = config['training'].get('save_best_model', True)
@@ -240,7 +263,7 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
         resume_path = config['training'].get('resume_checkpoint', None)
         
         if resume_path and os.path.exists(resume_path):
-            print(f"\n🔄 Resuming cluster training from: {resume_path}")
+            print(f"\n🔄 Resuming cluster training from: {resume_path}", flush=True)
             checkpoint = torch.load(resume_path, map_location=self.device)
             
             if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
@@ -253,26 +276,22 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
                 self.start_epoch = checkpoint.get('epoch', 0)
                 self.best_map = checkpoint.get('best_map', 0.0)
                 self.best_val_loss = checkpoint.get('best_val_loss', float('inf'))
+                self.epochs_without_improvement = checkpoint.get('epochs_without_improvement', 0)
 
-                # ==============================================================
                 # 1. THE LR OVERRIDE: Force the loaded optimizer to use the config LR
-                # ==============================================================
                 for param_group in self.optimizer.param_groups:
                     param_group['lr'] = config['training']['learning_rate']
 
-                # ==============================================================
                 # 2. THE SAMPLER MEMORY: Restore exact class distributions
-                # ==============================================================
                 if 'sampler_weights' in checkpoint and checkpoint['sampler_weights'] is not None:
                     if hasattr(self, 'adaptive_sampler'):
-                        # Force the sampler's internal dictionary to use the saved weights
                         self.adaptive_sampler.class_weights = checkpoint['sampler_weights']
-                        print("  ↳ Successfully restored Adaptive Sampler distribution!")
+                        print("  ↳ Successfully restored Adaptive Sampler distribution!", flush=True)
 
-                print(f"  ↳ Successfully restored model, optimizer, and scheduler to epoch {self.start_epoch}!")
+                print(f"  ↳ Successfully restored model, optimizer, and scheduler to epoch {self.start_epoch}!", flush=True)
             else:
                 self.model.load_state_dict(checkpoint)
-                print("  ↳ Loaded weights only.")
+                print("  ↳ Loaded weights only.", flush=True)
 
         self.evaluator = DETREvaluator(
             model=self.model, data_loader=self.val_loader, processor=self.processor, device=self.device, config=config,
@@ -286,10 +305,8 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
         siou_str = "InnerSIoU" if self.ablations.get('use_inner_siou') else "BaseLoss"
         
         log_dir = f"runs/{self.arch}_{sampler_str}_{siou_str}_{timestamp}"
-        self.writer = SummaryWriter(log_dir=log_dir)
-        print(f"📊 TensorBoard logging to: {log_dir}")
-
-        
+        self.writer = SummaryWriter(log_dir=log_dir, flush_secs=10)
+        print(f"📊 TensorBoard logging to: {log_dir}", flush=True)
 
     def _setup_adaptive_sampler(self, config):
         from turbine_processing.sampler_adaptive import AdaptiveDETRSampler
@@ -318,25 +335,176 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
             pin_memory=True,
             persistent_workers=config['training']['num_workers'] > 0,
             prefetch_factor=8 if config['training']['num_workers'] > 0 else None,
-            
         )
 
-    def _update_sampler_weights(self, metrics):
-        if not hasattr(self, 'adaptive_sampler') or 'pr_data' not in metrics:
+    def _extract_per_class_metrics(self, metrics):
+        """
+        Extracts per-class AP, Precision, Recall, and F1 from `metrics` regardless
+        of whether DETREvaluator stores them in `pr_data`, `per_class_ap`, or `classes`.
+        Guarantees every foreground class (1 .. num_classes-1) has a valid float entry.
+        """
+        per_class = {}
+        for cid in range(1, self.num_classes):
+            c_name = self.class_names[cid] if cid < len(self.class_names) else f"Class_{cid}"
+            per_class[cid] = {
+                "name": c_name,
+                "ap": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 0
+            }
+
+        # 1. Check standard `pr_data` dict (keyed by int or str class_id)
+        pr_data = metrics.get('pr_data', {})
+        if isinstance(pr_data, dict):
+            for raw_cid, data in pr_data.items():
+                try:
+                    cid = int(raw_cid)
+                except (ValueError, TypeError):
+                    continue
+                if cid <= 0 or cid not in per_class:
+                    continue
+                if isinstance(data, dict):
+                    ap = to_safe_float(data.get('ap', data.get('AP', data.get('map', 0.0))))
+                    prec = to_safe_float(data.get('precision', data.get('prec', 0.0)))
+                    rec = to_safe_float(data.get('recall', data.get('rec', 0.0)))
+                    f1 = to_safe_float(data.get('f1', (2 * prec * rec / (prec + rec)) if (prec + rec) > 0 else 0.0))
+                    sup = int(to_safe_float(data.get('support', data.get('num_gt', data.get('count', 0)))))
+                    per_class[cid].update({"ap": ap, "precision": prec, "recall": rec, "f1": f1, "support": sup})
+                else:
+                    per_class[cid]["ap"] = to_safe_float(data)
+
+        # 2. Check fallback `per_class_ap` or `class_ap` dictionary
+        for alt_key in ['per_class_ap', 'class_ap', 'ap_per_class', 'map_per_class']:
+            if alt_key in metrics and isinstance(metrics[alt_key], dict):
+                for raw_cid, val in metrics[alt_key].items():
+                    try:
+                        cid = int(raw_cid)
+                        if cid in per_class and per_class[cid]["ap"] == 0.0:
+                            per_class[cid]["ap"] = to_safe_float(val)
+                    except (ValueError, TypeError):
+                        pass
+
+        return per_class
+
+    def _log_and_print_eval_metrics(self, metrics, epoch_num, split_tag="Validation"):
+        """
+        Logs all overall, scale-specific, and per-class metrics to TensorBoard AND
+        prints a full human-readable table + single-line JSON backup to stdout.
+        """
+        # 1. Extract headline metrics safely
+        mAP_50 = to_safe_float(metrics.get('mAP', metrics.get('map_50', 0.0)))
+        mAP_50_95 = to_safe_float(metrics.get('mAP_50_95', metrics.get('map', 0.0)))
+        precision = to_safe_float(metrics.get('Precision', metrics.get('precision', 0.0)))
+        recall = to_safe_float(metrics.get('Recall', metrics.get('recall', 0.0)))
+        f1_score = to_safe_float(metrics.get('F1', metrics.get('f1', 0.0)))
+        if f1_score == 0.0 and (precision + recall) > 0:
+            f1_score = 2.0 * (precision * recall) / (precision + recall)
+
+        bg_acc = to_safe_float(metrics.get('bg_accuracy', metrics.get('background_accuracy', -1.0)), default=-1.0)
+        map_small = to_safe_float(metrics.get('mAP_Small', metrics.get('map_small', -1.0)), default=-1.0)
+        map_medium = to_safe_float(metrics.get('mAP_Medium', metrics.get('map_medium', -1.0)), default=-1.0)
+        map_large = to_safe_float(metrics.get('mAP_Large', metrics.get('map_large', -1.0)), default=-1.0)
+
+        per_class = self._extract_per_class_metrics(metrics)
+
+        # 2. Write to TensorBoard (only if epoch_num is an integer)
+        if isinstance(epoch_num, int):
+            self.writer.add_scalar(f'{split_tag}_Metrics/mAP_0.5', mAP_50, epoch_num)
+            self.writer.add_scalar(f'{split_tag}_Metrics/mAP_0.5_0.95', mAP_50_95, epoch_num)
+            self.writer.add_scalar(f'{split_tag}_Metrics/Precision', precision, epoch_num)
+            self.writer.add_scalar(f'{split_tag}_Metrics/Recall', recall, epoch_num)
+            self.writer.add_scalar(f'{split_tag}_Metrics/F1_Score', f1_score, epoch_num)
+
+            if bg_acc >= 0.0:
+                self.writer.add_scalar(f'{split_tag}_Metrics/Background_Accuracy', bg_acc, epoch_num)
+            if map_small >= 0.0:
+                self.writer.add_scalar(f'{split_tag}_Scale/mAP_Small', map_small, epoch_num)
+            if map_medium >= 0.0:
+                self.writer.add_scalar(f'{split_tag}_Scale/mAP_Medium', map_medium, epoch_num)
+            if map_large >= 0.0:
+                self.writer.add_scalar(f'{split_tag}_Scale/mAP_Large', map_large, epoch_num)
+
+            # Log Individual Per-Class AP, Recall, Precision, F1
+            multi_class_ap_dict = {}
+            for cid, cdata in per_class.items():
+                clean_name = cdata["name"].replace(" ", "_").replace("/", "_")
+                tag_name = f"{cid:02d}_{clean_name}"
+                self.writer.add_scalar(f'{split_tag}_Per_Class_AP/{tag_name}', cdata["ap"], epoch_num)
+                self.writer.add_scalar(f'{split_tag}_Per_Class_Recall/{tag_name}', cdata["recall"], epoch_num)
+                self.writer.add_scalar(f'{split_tag}_Per_Class_Precision/{tag_name}', cdata["precision"], epoch_num)
+                self.writer.add_scalar(f'{split_tag}_Per_Class_F1/{tag_name}', cdata["f1"], epoch_num)
+                multi_class_ap_dict[clean_name] = cdata["ap"]
+
+            # Also log combined chart for quick comparison if <= 15 classes
+            if len(multi_class_ap_dict) <= 15:
+                self.writer.add_scalars(f'{split_tag}_Combined/All_Classes_AP', multi_class_ap_dict, epoch_num)
+
+            # CRITICAL: Force write to disk immediately so HPC cluster logs never lag or vanish
+            self.writer.flush()
+
+        # 3. Print Complete Per-Class Breakdown Table to stdout (for log file parsing)
+        print(f"\n{'='*78}")
+        print(f"📋 [{split_tag.upper()} REPORT] Epoch: {epoch_num} | Arch: {self.arch.upper()}")
+        print(f"{'-'*78}")
+        print(f"  mAP@0.5      : {mAP_50:.4f} ({mAP_50*100:.2f}%)")
+        print(f"  mAP@0.5:0.95 : {mAP_50_95:.4f} ({mAP_50_95*100:.2f}%)")
+        print(f"  Precision    : {precision:.4f} | Recall: {recall:.4f} | F1-Score: {f1_score:.4f}")
+        print(f"  Scale mAPs   : Small={map_small:.4f} | Medium={map_medium:.4f} | Large={map_large:.4f}")
+        if bg_acc >= 0.0:
+            print(f"  BG Accuracy  : {bg_acc:.4f}")
+        print(f"{'-'*78}")
+        print(f"  {'ID':<4} {'Class Name':<32} {'AP@0.5':>10} {'Precision':>10} {'Recall':>10} {'F1':>8}")
+        print(f"  {'-'*74}")
+        for cid, cdata in per_class.items():
+            print(
+                f"  {cid:<4d} {cdata['name'][:32]:<32} "
+                f"{cdata['ap']:>10.4f} {cdata['precision']:>10.4f} "
+                f"{cdata['recall']:>10.4f} {cdata['f1']:>8.4f}"
+            )
+        print(f"{'='*78}")
+
+        # 4. Print Single-Line JSON Backup (grep '[PARSE_EVAL_JSON]' your_log.out to plot everything!)
+        log_payload = {
+            "split": split_tag,
+            "epoch": epoch_num,
+            "arch": self.arch,
+            "mAP_50": round(mAP_50, 6),
+            "mAP_50_95": round(mAP_50_95, 6),
+            "precision": round(precision, 6),
+            "recall": round(recall, 6),
+            "f1": round(f1_score, 6),
+            "mAP_Small": round(map_small, 6),
+            "mAP_Medium": round(map_medium, 6),
+            "mAP_Large": round(map_large, 6),
+            "bg_accuracy": round(bg_acc, 6),
+            "per_class_ap": {cdata["name"]: round(cdata["ap"], 6) for cid, cdata in per_class.items()},
+            "per_class_recall": {cdata["name"]: round(cdata["recall"], 6) for cid, cdata in per_class.items()},
+        }
+        print(f"[PARSE_EVAL_JSON] {json.dumps(log_payload)}", flush=True)
+
+        return mAP_50, per_class
+
+    def _update_sampler_weights(self, metrics, per_class_extracted):
+        if not hasattr(self, 'adaptive_sampler'):
             return
 
         if not hasattr(self.adaptive_sampler, 'update_class_weights'):
             return
 
-        class_ap = {class_id: data['ap'] for class_id, data in metrics['pr_data'].items() if class_id > 0}
+        class_ap = {cid: cdata['ap'] for cid, cdata in per_class_extracted.items() if cid > 0}
         self.adaptive_sampler.update_class_weights(class_ap, metrics.get('bg_accuracy', None))
 
         for class_id, weight in self.adaptive_sampler.get_current_weights().items():
-            class_name = self.config['model']['class_names'][class_id] if class_id < len(self.config['model']['class_names']) else f"class_{class_id}"
-            self.writer.add_scalar(f'Sampler_Weights/{class_name}', weight, self.current_epoch)
+            class_name = self.class_names[class_id] if class_id < len(self.class_names) else f"class_{class_id}"
+            clean_name = class_name.replace(" ", "_")
+            self.writer.add_scalar(f'Sampler_Weights/{class_id:02d}_{clean_name}', to_safe_float(weight), self.current_epoch + 1)
             
         if hasattr(self.adaptive_sampler, 'bg_ratio'):
-            self.writer.add_scalar('Sampler_Weights/Background_Ratio', self.adaptive_sampler.bg_ratio, self.current_epoch)
+            self.writer.add_scalar('Sampler_Weights/Background_Ratio', to_safe_float(self.adaptive_sampler.bg_ratio), self.current_epoch + 1)
+
+        self.writer.flush()
 
     def _extract_rcnn_targets(self, targets, img_h, img_w):
         rcnn_targets = []
@@ -375,6 +543,9 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
         crash_count = 0
         MAX_EARLY_CRASHES = 3
 
+        # Accumulate per-class training losses across the epoch so we can log both batch & epoch averages
+        epoch_class_losses = {cid: [] for cid in range(self.num_classes)}
+
         pbar = tqdm(
             self.train_loader,
             desc=f"Epoch {epoch+1:3d}/{self.config['training']['num_epochs']:3d} Train",
@@ -407,6 +578,12 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
                     outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=targets)
                     loss = outputs.loss
                     log_metrics = {}
+                    # Also track DETR sub-losses (loss_ce, loss_bbox, loss_giou) if present
+                    if hasattr(outputs, 'loss_dict') and isinstance(outputs.loss_dict, dict):
+                        global_step = (epoch * len(self.train_loader)) + batch_idx
+                        if global_step % 50 == 0:
+                            for lk, lv in outputs.loss_dict.items():
+                                self.writer.add_scalar(f"Train_SubLosses/{lk}", to_safe_float(lv), global_step)
 
                 if torch.isnan(loss) or torch.isinf(loss):
                     tqdm.write(f"⚠ Warning: NaN/Inf loss at batch {batch_idx}. Skipping update.")
@@ -419,13 +596,18 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
                 self.optimizer.step()
 
                 global_step = (epoch * len(self.train_loader)) + batch_idx
+                if global_step % 50 == 0:
+                    self.writer.add_scalar("Loss/Train_Batch_Loss", float(loss.item()), global_step)
+
                 for k, v in log_metrics.items():
                     class_id = int(k.split("_")[-1])
-                    if class_id < len(self.config['model']['class_names']):
-                        class_name = self.config['model']['class_names'][class_id]
-                    else:
-                        class_name = f"Class_{class_id}"
-                    self.writer.add_scalar(f"Per_Class_Loss/{class_name}", v.item(), global_step)
+                    val_float = to_safe_float(v)
+                    if class_id in epoch_class_losses:
+                        epoch_class_losses[class_id].append(val_float)
+                    class_name = self.class_names[class_id] if class_id < len(self.class_names) else f"Class_{class_id}"
+                    clean_name = class_name.replace(" ", "_")
+                    if global_step % 50 == 0:
+                        self.writer.add_scalar(f"Per_Class_Train_Loss_Step/{class_id:02d}_{clean_name}", val_float, global_step)
 
             except Exception as e:
                 crash_count += 1
@@ -433,8 +615,6 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
                 tqdm.write(traceback.format_exc())
                 self.optimizer.zero_grad()
 
-                # Early abort: if too many crashes happen in the first 20 batches,
-                # the patch is broken — fail fast instead of wasting hours
                 if batch_idx < 20 and crash_count >= MAX_EARLY_CRASHES:
                     raise RuntimeError(
                         f"\n🚨 ABORTING EPOCH {epoch+1}: {crash_count} crashes within the first "
@@ -443,7 +623,7 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
                     )
                 continue
 
-            last_batch_loss = loss.item()
+            last_batch_loss = float(loss.item())
             total_loss  += last_batch_loss
             valid_batches += 1
             avg_loss = total_loss / valid_batches
@@ -455,6 +635,14 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
 
         avg_loss = total_loss / max(valid_batches, 1)
         self.train_losses.append(avg_loss)
+
+        # Log epoch-level per-class loss for Faster R-CNN
+        for cid, loss_list in epoch_class_losses.items():
+            if len(loss_list) > 0:
+                c_name = self.class_names[cid] if cid < len(self.class_names) else f"Class_{cid}"
+                clean_name = c_name.replace(" ", "_")
+                self.writer.add_scalar(f"Per_Class_Train_Loss_Epoch/{cid:02d}_{clean_name}", float(np.mean(loss_list)), epoch + 1)
+
         return avg_loss
 
     def train(self):
@@ -465,41 +653,29 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
         print(f"  Adaptive Sampler   : {self.ablations.get('use_adaptive_sampler', False)}")
         print(f"  Inner-SIoU Loss    : {self.ablations.get('use_inner_siou', False)}")
         print(f"  Training samples   : {len(self.train_loader.dataset)}")
-        print(f"  Learning rate      : {self.config['training']['learning_rate']}")
+        print(f"  Learning rate      : {self.config['training']['learning_rate']}", flush=True)
 
         for epoch in range(self.start_epoch, self.config['training']['num_epochs']):
             self.current_epoch = epoch
-            print(f"\n{'='*60}")
+            print(f"\n{'='*60}", flush=True)
 
             train_loss = self.train_one_epoch(epoch)
+            current_lr = self.optimizer.param_groups[0]['lr']
             self.writer.add_scalar('Loss/Train_Epoch_Average', train_loss, epoch + 1)
+            self.writer.add_scalar('Training/Learning_Rate', current_lr, epoch + 1)
+            self.writer.flush()
+
+            print(f"[PARSE_TRAIN_JSON] {json.dumps({'epoch': epoch + 1, 'train_loss': round(train_loss, 6), 'lr': current_lr})}", flush=True)
+
             self.scheduler.step()
 
             if (epoch + 1) % self.config['training']['eval_every_n_epochs'] == 0:
-                print(f"\n  Running detailed evaluation at epoch {epoch+1}…")
+                print(f"\n  Running detailed evaluation at epoch {epoch+1}…", flush=True)
                 metrics, _, _ = self.evaluator.evaluate(epoch=epoch+1)
                 
-                self.writer.add_scalar('Validation_Metrics/mAP_0.5', metrics.get('mAP', 0.0), epoch + 1)
-                self.writer.add_scalar('Validation_Metrics/mAP_0.5_0.95', metrics.get('mAP_50_95', 0.0), epoch + 1)
-                self.writer.add_scalar('Validation_Metrics/Recall', metrics.get('Recall', 0.0), epoch + 1)
-                self.writer.add_scalar('Validation_Metrics/F1_Score', metrics.get('F1', 0.0), epoch + 1)
-                
-                if metrics.get('mAP_Small', -1.0) >= 0:
-                    self.writer.add_scalar('Validation_Scale/mAP_Small', metrics.get('mAP_Small', 0.0), epoch + 1)
-                if metrics.get('mAP_Medium', -1.0) >= 0:
-                    self.writer.add_scalar('Validation_Scale/mAP_Medium', metrics.get('mAP_Medium', 0.0), epoch + 1)
-                if metrics.get('mAP_Large', -1.0) >= 0:
-                    self.writer.add_scalar('Validation_Scale/mAP_Large', metrics.get('mAP_Large', 0.0), epoch + 1)
-
-                if 'pr_data' in metrics:
-                    for class_id, data in metrics['pr_data'].items():
-                        if class_id > 0:
-                            c_name = self.config['model']['class_names'][class_id] if class_id < len(self.config['model']['class_names']) else f"Class_{class_id}"
-                            c_name = c_name.replace(" ", "_")
-                            self.writer.add_scalar(f'Validation_Per_Class_AP/{c_name}', data.get('ap', 0.0), epoch + 1)
-
-                current_map = metrics.get('mAP', 0.0)
-                print(f"\n{'='*60}")
+                current_map, per_class_extracted = self._log_and_print_eval_metrics(
+                    metrics, epoch_num=epoch + 1, split_tag="Validation"
+                )
                 
                 if current_map > getattr(self, 'best_map', 0.0):
                     self.best_map = current_map
@@ -508,21 +684,21 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
                         best_model_path = self.config['training']['output_model_path'].replace('.pth', '_best.pth')
                         os.makedirs(os.path.dirname(best_model_path), exist_ok=True)
                         torch.save(self.model.state_dict(), best_model_path)
-                        print(f"  🎉 New best mAP={current_map:.4f} → {os.path.basename(best_model_path)}")
+                        print(f"  🎉 New best mAP={current_map:.4f} → {os.path.basename(best_model_path)}", flush=True)
                 else:
                     self.epochs_without_improvement += 1
-                    print(f"  ⚠ No improvement for {self.epochs_without_improvement}/{self.config['training']['patience']} evaluations")
+                    print(f"  ⚠ No improvement for {self.epochs_without_improvement}/{self.config['training']['patience']} evaluations", flush=True)
                     
-                self._update_sampler_weights(metrics)
+                self._update_sampler_weights(metrics, per_class_extracted)
                 
                 if hasattr(self, 'adaptive_sampler') and hasattr(self.adaptive_sampler, 'print_current_distribution'):
-                    print("\n📊 UPDATED SAMPLER DISTRIBUTION BASED ON NEW AP:")
+                    print("\n📊 UPDATED SAMPLER DISTRIBUTION BASED ON NEW AP:", flush=True)
                     self.adaptive_sampler.print_current_distribution()
 
-                print(f"{'='*60}")
+                print(f"{'='*60}", flush=True)
 
                 if self.epochs_without_improvement >= self.config['training']['patience']:
-                    print(f"\n🛑 Early stopping triggered after {epoch + 1} epochs.")
+                    print(f"\n🛑 Early stopping triggered after {epoch + 1} epochs.", flush=True)
                     break
             
             if (epoch + 1) % self.config['training'].get('save_checkpoint_every', 10) == 0:
@@ -530,40 +706,39 @@ class DETRTrainerWithAblations(DETRWithExistingDataPipeline):
                 os.makedirs(ckpt_dir, exist_ok=True)
                 ckpt_path = os.path.join(ckpt_dir, f"epoch_{epoch+1}.pth")
                 
+                sampler_w = getattr(self.adaptive_sampler, 'class_weights', None) if hasattr(self, 'adaptive_sampler') else None
                 torch.save({
                     'epoch': epoch + 1,
                     'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'scheduler_state_dict': self.scheduler.state_dict(),
-                    'best_map': getattr(self, 'best_map', 0.0)
+                    'best_map': getattr(self, 'best_map', 0.0),
+                    'best_val_loss': getattr(self, 'best_val_loss', float('inf')),
+                    'epochs_without_improvement': self.epochs_without_improvement,
+                    'sampler_weights': sampler_w
                 }, ckpt_path)
-                print(f"  💾 Saved cluster checkpoint: {ckpt_path}")
+                print(f"  💾 Saved cluster checkpoint: {ckpt_path}", flush=True)
 
         print("\n============================================================")
         print("Final evaluation on test set…")
-        print("============================================================")
+        print("============================================================", flush=True)
         try:
             best_model_path = self.config['training']['output_model_path'].replace('.pth', '_best.pth')
             if os.path.exists(best_model_path):
-                print(f"  Loading best checkpoint from: {best_model_path}")
-                self.model.load_state_dict(torch.load(best_model_path))
+                print(f"  Loading best checkpoint from: {best_model_path}", flush=True)
+                self.model.load_state_dict(torch.load(best_model_path, map_location=self.device))
             else:
-                print(f"  ⚠ Best checkpoint not found at {best_model_path}.")
+                print(f"  ⚠ Best checkpoint not found at {best_model_path}.", flush=True)
                 
             self.model.eval()
             self.evaluator.data_loader = self.test_loader
             metrics, _, _ = self.evaluator.evaluate(epoch="final_test")
             
-            print("\n" + "="*60)
-            print("🏆 FINAL TEST SET SUMMARY (FOR PAPER)")
-            print("="*60)
-            print(f"  mAP@0.5      : {metrics.get('mAP', 0.0):.4f}")
-            print(f"  mAP@0.5:0.95 : {metrics.get('mAP_50_95', 0.0):.4f}")
-            print(f"  Recall       : {metrics.get('Recall', 0.0):.4f}")
-            print("============================================================\n")
+            self._log_and_print_eval_metrics(metrics, epoch_num=self.config['training']['num_epochs'], split_tag="Final_Test")
         except Exception as e:
-            print(f"⚠ Could not complete final test evaluation. Error: {e}")
+            print(f"⚠ Could not complete final test evaluation. Error: {e}", flush=True)
 
+        self.writer.flush()
         self.writer.close()
         return self.model
 
@@ -577,7 +752,7 @@ def main():
         config = yaml.safe_load(f)
     trainer = DETRTrainerWithAblations(config)
     trainer.train()
-    print("\n✅ Done!")
+    print("\n✅ Done!", flush=True)
 
 
 if __name__ == "__main__":
